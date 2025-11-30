@@ -1,4 +1,11 @@
-# igv
+# オリジナルFASTAに対してもBLATを利用可能なIGV改変版
+
+IGV上でblat (相同性検索ツール)をUCSCに登録されたゲノム以外のFASTAファイルに対しても使いたい場合は、IGVを開いて View > Preferences > Advanced > BLAT URLのところに、
+```
+/path/to/IGV_Linux_blat/blat.sh $DB $SEQUENCE
+```
+と入力して保存してください
+
 
 ![Build Status](https://github.com/igvteam/igv/actions/workflows/gradle.yml/badge.svg)
 ![GitHub issues](https://img.shields.io/github/issues/igvteam/igv)
