@@ -75,6 +75,7 @@ public class BlatClient {
         } else {
 
             String dbEncoded = URLEncoder.encode(db, "UTF-8");
+            String dbUnencoded = db;
 
             //Strip leading "file://" protocol, if any
             if (urlpref.startsWith("file://")) {
@@ -106,7 +107,10 @@ public class BlatClient {
                     }
 
                 } else {
-                    jsonString = RuntimeUtils.exec(urlpref);
+                    // For command-line BLAT clients, substitute placeholders without URL-encoding
+                    // to allow passing raw file paths or names.
+                    String cmd = urlpref.replace("$SEQUENCE", userSeq).replace("$DB", dbUnencoded);
+                    jsonString = RuntimeUtils.exec(cmd);
                 }
                 JSONObject obj = new org.json.JSONObject(jsonString);
 
@@ -210,4 +214,3 @@ public class BlatClient {
             "gorGor4", "gorGor6", "panPan2", "susScr11", "strPur2"));
 
 }
-
