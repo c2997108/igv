@@ -70,6 +70,17 @@ public class BlatTableModel extends AbstractTableModel {
     }
 
     @Override
+    public Class<?> getColumnClass(int columnIndex) {
+        switch (columnIndex) {
+            case 0:
+            case 3:
+                return String.class;
+            default:
+                return Integer.class;
+        }
+    }
+
+    @Override
     public Object getValueAt(int rowIndex, int columnIndex) {
 
         PSLRecord record = records.get(rowIndex);

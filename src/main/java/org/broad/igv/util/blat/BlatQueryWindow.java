@@ -39,6 +39,7 @@ import org.broad.igv.util.LongRunningTask;
 import javax.swing.*;
 import javax.swing.event.ListSelectionEvent;
 import javax.swing.event.ListSelectionListener;
+import javax.swing.table.TableRowSorter;
 import java.awt.*;
 import java.awt.event.ActionEvent;
 import java.awt.event.ActionListener;
@@ -58,6 +59,7 @@ public class BlatQueryWindow extends JFrame {
 
         model = new BlatTableModel(records);
         initComponents();
+        configureSorting();
         addSelectionListener();
 
         querySeqTextPane.setContentType("text/html");
@@ -80,9 +82,10 @@ public class BlatQueryWindow extends JFrame {
                 ListSelectionModel lsm = (ListSelectionModel) e.getSource();
                 if (!lsm.isSelectionEmpty()) {
                     int selectedRow = lsm.getMinSelectionIndex();
-                    final String chr = model.getChr(selectedRow);
-                    int start = model.getStart(selectedRow);
-                    int end = model.getEnd(selectedRow);
+                    int modelRowIndex = blatTable.convertRowIndexToModel(selectedRow);
+                    final String chr = model.getChr(modelRowIndex);
+                    int start = model.getStart(modelRowIndex);
+                    int end = model.getEnd(modelRowIndex);
 
                     // Expand region slightly for context
                     int w = (end - start) / 4;
@@ -98,6 +101,11 @@ public class BlatQueryWindow extends JFrame {
                 }
             }
         });
+    }
+
+    private void configureSorting() {
+        TableRowSorter<BlatTableModel> sorter = new TableRowSorter<>(model);
+        blatTable.setRowSorter(sorter);
     }
 
 
