@@ -4,6 +4,7 @@ import org.broad.igv.feature.CachingFeatureSource;
 import org.broad.igv.feature.Strand;
 import org.broad.igv.feature.genome.GenomeManager;
 import org.broad.igv.tools.motiffinder.MotifFinderSource;
+import org.broad.igv.util.ResourceLocator;
 import org.w3c.dom.Document;
 import org.w3c.dom.Element;
 
@@ -11,6 +12,7 @@ public class MotifTrack extends FeatureTrack {
 
     private String pattern;
     private Strand strand;
+    private ResourceLocator syntheticLocator;
 
     /**
      * Empty constructor for unmarshalling session
@@ -31,6 +33,25 @@ public class MotifTrack extends FeatureTrack {
         CachingFeatureSource source = new CachingFeatureSource(src);
         super.init(null, source);
         setSortable(false);
+    }
+
+    @Override
+    public ResourceLocator getResourceLocator() {
+        ResourceLocator locator = super.getResourceLocator();
+        if (locator != null) {
+            return locator;
+        }
+        if (syntheticLocator == null) {
+            String id = getId();
+            if (id == null || id.isEmpty()) {
+                id = getName();
+            }
+            if (id == null || id.isEmpty()) {
+                id = "motif-" + System.identityHashCode(this);
+            }
+            syntheticLocator = new ResourceLocator("motif://" + id);
+        }
+        return syntheticLocator;
     }
 
     @Override

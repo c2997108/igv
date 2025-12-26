@@ -15,6 +15,7 @@ import org.broad.igv.ui.panel.ReferenceFrame;
 import org.broad.igv.ui.util.MessageUtils;
 import org.broad.igv.util.blat.BlatClient;
 import org.broad.igv.util.blat.BlatQueryWindow;
+import org.broad.igv.util.ResourceLocator;
 import org.w3c.dom.Document;
 import org.w3c.dom.Element;
 
@@ -37,6 +38,7 @@ public class BlatTrack extends FeatureTrack {
     String sequence;
     String db;
     List<PSLRecord> features;
+    private ResourceLocator syntheticLocator;
 
     /**
      * Restore from session
@@ -79,6 +81,25 @@ public class BlatTrack extends FeatureTrack {
 
     public List<PSLRecord> getFeatures() {
         return features;
+    }
+
+    @Override
+    public ResourceLocator getResourceLocator() {
+        ResourceLocator locator = super.getResourceLocator();
+        if (locator != null) {
+            return locator;
+        }
+        if (syntheticLocator == null) {
+            String id = getId();
+            if (id == null || id.isEmpty()) {
+                id = getName();
+            }
+            if (id == null || id.isEmpty()) {
+                id = "blat-" + System.identityHashCode(this);
+            }
+            syntheticLocator = new ResourceLocator("blat://" + id);
+        }
+        return syntheticLocator;
     }
 
     @Override
