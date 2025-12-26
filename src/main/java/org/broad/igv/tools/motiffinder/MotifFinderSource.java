@@ -155,9 +155,17 @@ public class MotifFinderSource implements FeatureSource<Feature>, Persistable {
 
     @Override
     public Iterator<Feature> getFeatures(String chr, int start, int end) throws IOException {
-        byte[] seq = genome.getSequence(chr, start, end);
-        if (seq == null) Collections.emptyList().iterator();
-        return search(this.pattern, this.strand, chr, start, seq);
+        // Clamp to valid genomic coordinates to avoid negative feature positions.
+        if (end <= 0) {
+            return Collections.<Feature>emptyList().iterator();
+        }
+        int clampedStart = Math.max(0, start);
+        int clampedEnd = Math.max(clampedStart, end);
+        byte[] seq = genome.getSequence(chr, clampedStart, clampedEnd);
+        if (seq == null) {
+            return Collections.<Feature>emptyList().iterator();
+        }
+        return search(this.pattern, this.strand, chr, clampedStart, seq);
     }
 
     @Override
