@@ -66,6 +66,7 @@ import org.broad.igv.util.BrowserLauncher;
 import org.broad.igv.util.GoogleUtils;
 import org.broad.igv.util.LongRunningTask;
 import org.broad.igv.util.blat.BlatClient;
+import org.broad.igv.blast.BlastSearch;
 
 import javax.swing.*;
 import javax.swing.event.MenuEvent;
@@ -225,6 +226,7 @@ public class IGVMenuBar extends JMenuBar  {
 
         // BLAT
         menuItems.add(createBlatMenuItem());
+        menuItems.add(createBlastMenuItem());
 
         // Combine data tracks
         JMenuItem combineDataItem = new JMenuItem("Combine Data Tracks...");
@@ -1217,6 +1219,12 @@ public class IGVMenuBar extends JMenuBar  {
         return menuItem;
     }
 
+    public static JMenuItem createBlastMenuItem() {
+        JMenuItem menuItem = new JMenuItem("BLAST ...");
+        menuItem.addActionListener(e -> BlastSearch.promptForSequence());
+        return menuItem;
+    }
+
     private void exportTrackNames(final Collection<Track> selectedTracks) {
 
         if (selectedTracks.isEmpty()) {
@@ -1269,4 +1277,3 @@ public class IGVMenuBar extends JMenuBar  {
     }
 
 }
-

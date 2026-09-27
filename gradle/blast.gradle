@@ -1,0 +1,94 @@
+import java.security.MessageDigest
+
+// Native executables stay in build/, rather than being committed to Git or put into igv.jar.
+def blastVersion = providers.gradleProperty('blastVersion').getOrElse('2.17.0')
+def platforms = [
+        'windows-x64': 'x64-win64',
+        'macos-universal': 'universal-macosx',
+        'linux-x64': 'x64-linux',
+        'linux-arm64': 'aarch64-linux'
+]
+def os = System.getProperty('os.name').toLowerCase(Locale.ROOT)
+def arm = System.getProperty('os.arch').toLowerCase(Locale.ROOT) in ['aarch64', 'arm64']
+ext.blastHostPlatform = providers.gradleProperty('blastPlatform').getOrElse(
+        os.startsWith('windows') ? 'windows-x64' : os.contains('mac') ? 'macos-universal' : arm ? 'linux-arm64' : 'linux-x64')
+ext.blastLinuxPlatform = providers.gradleProperty('blastLinuxPlatform').getOrElse('linux-x64')
+if (!platforms.containsKey(blastHostPlatform) || !(blastLinuxPlatform in ['linux-x64', 'linux-arm64'])) {
+    throw new GradleException('Unsupported BLAST platform. Use windows-x64, macos-universal, linux-x64 or linux-arm64.')
+}
+ext.blastBundleDirectory = { String platform -> layout.buildDirectory.dir("bundled-blast/${platform}").get().asFile }
+def downloadTasks = [:]
+def md5 = { File file ->
+    def digest = MessageDigest.getInstance('MD5')
+    file.withInputStream { input ->
+        byte[] buffer = new byte[65536]
+        int count
+        while ((count = input.read(buffer)) >= 0) digest.update(buffer, 0, count)
+    }
+    digest.digest().encodeHex().toString()
+}
+def fetch = { URL url, File destination ->
+    def connection = url.openConnection()
+    connection.connectTimeout = 30000
+    connection.readTimeout = 60000
+    connection.setRequestProperty('User-Agent', 'IGV-BLAST-bundler')
+    connection.inputStream.withCloseable { input -> destination.withOutputStream { output -> output << input } }
+}
+platforms.each { platform, suffix ->
+    def name = 'downloadBlast' + platform.split('-').collect { it.capitalize() }.join('')
+    downloadTasks[platform] = tasks.register(name) {
+        group = 'distribution'
+        description = "Download and verify NCBI BLAST+ ${blastVersion} for ${platform}."
+        inputs.property('blastVersion', blastVersion)
+        outputs.dir(blastBundleDirectory(platform))
+        doLast {
+            def packageName = "ncbi-blast-${blastVersion}+-${suffix}.tar.gz"
+            def base = "https://ftp.ncbi.nlm.nih.gov/blast/executables/blast+/${blastVersion}/"
+            def downloads = layout.buildDirectory.dir('blast-downloads').get().asFile
+            downloads.mkdirs()
+            def archive = new File(downloads, packageName)
+            def checksumFile = new File(downloads, packageName + '.md5')
+            fetch(new URL(base + packageName + '.md5'), checksumFile)
+            def expected = (checksumFile.getText('UTF-8') =~ /(?i)[0-9a-f]{32}/)
+            if (!expected.find()) throw new GradleException("Invalid NCBI checksum for ${packageName}")
+            def checksum = expected.group().toLowerCase(Locale.ROOT)
+            if (!archive.exists() || md5(archive) != checksum) {
+                logger.lifecycle("Downloading ${packageName} from NCBI...")
+                def partial = new File(downloads, packageName + '.part')
+                fetch(new URL(base + packageName), partial)
+                if (md5(partial) != checksum) throw new GradleException("NCBI checksum mismatch: ${packageName}")
+                java.nio.file.Files.move(partial.toPath(), archive.toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING)
+            }
+            copy {
+                from tarTree(resources.gzip(archive))
+                include '**/bin/blastn', '**/bin/makeblastdb', '**/bin/blastn.exe', '**/bin/makeblastdb.exe'
+                include '**/bin/*.dll', '**/bin/*.dylib', '**/bin/*.so*', '**/bin/blastn.exe.manifest', '**/bin/makeblastdb.exe.manifest'
+                include '**/lib/**', '**/LICENSE*', '**/COPYING*', '**/README*'
+                eachFile { detail -> detail.path = detail.path.substring(detail.path.indexOf('/') + 1) }
+                includeEmptyDirs = false
+                into blastBundleDirectory(platform)
+            }
+            new File(blastBundleDirectory(platform), 'bundle.properties').text = "version=${blastVersion}\nplatform=${platform}\nsource=${base}${packageName}\nmd5=${checksum}\n"
+            new File(blastBundleDirectory(platform), 'NCBI-NOTICE.txt').text = '''NCBI BLAST+ is public domain software.
+Source and usage information: https://blast.ncbi.nlm.nih.gov/doc/blast-help/developerinfo.html
+Official binaries: https://ftp.ncbi.nlm.nih.gov/blast/executables/blast+/
+'''
+        }
+    }
+}
+ext.blastDownloadTask = { String platform -> downloadTasks[platform] }
+tasks.register('downloadBlast') {
+    group = 'distribution'
+    description = 'Download the BLAST+ bundle selected for this host (override with -PblastPlatform).'
+    dependsOn downloadTasks[blastHostPlatform]
+}
+tasks.register('downloadAllBlast') {
+    group = 'distribution'
+    description = 'Download BLAST+ for Windows, universal macOS, and x64/ARM64 Linux.'
+    dependsOn downloadTasks.values()
+}
+
+// ZIP creation on Windows must retain Unix executable permissions for Mac/Linux bundles.
+tasks.withType(AbstractCopyTask).configureEach {
+    filesMatching(['**/blastn', '**/makeblastdb']) { permissions { unix('rwxr-xr-x') } }
+}

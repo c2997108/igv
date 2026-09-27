@@ -65,6 +65,8 @@ import org.broad.igv.util.Pair;
 import org.broad.igv.util.ResourceLocator;
 import org.broad.igv.util.StringUtils;
 import org.broad.igv.util.blat.BlatClient;
+import org.broad.igv.blast.BlastSearch;
+import org.broad.igv.blast.LocalBlastClient;
 import org.broad.igv.util.extview.ExtendViewClient;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -437,6 +439,7 @@ public class TrackMenuUtils {
 
                 final JMenuItem blatItem = getBlatItem(sequenceFeature);
                 featurePopupMenu.add(blatItem);
+                featurePopupMenu.add(getBlastItem(sequenceFeature));
             }
         }
 
@@ -1288,6 +1291,15 @@ public class TrackMenuUtils {
         return item;
     }
 
+    public static JMenuItem getBlastItem(final Feature feature) {
+        JMenuItem item = new JMenuItem("BLAST Sequence");
+        int length = feature.getEnd() - feature.getStart();
+        item.setEnabled(length >= LocalBlastClient.MINIMUM_SEQUENCE_LENGTH && length <= LocalBlastClient.MAXIMUM_SEQUENCE_LENGTH);
+        item.addActionListener(e -> BlastSearch.doBlastQueryFromRegion(feature.getChr(), feature.getStart(), feature.getEnd(),
+                feature instanceof IGVFeature ? ((IGVFeature) feature).getStrand() : Strand.NONE));
+        return item;
+    }
+
 
     /**
      * Return a representative track height to use as the default.  For now
@@ -1396,4 +1408,3 @@ public class TrackMenuUtils {
     }
 
 }
-

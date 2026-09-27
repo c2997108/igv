@@ -1,0 +1,294 @@
+buildscript {
+    repositories { mavenCentral() }
+    dependencies {
+        classpath 'org.apache.commons:commons-compress:1.28.0'
+        classpath 'org.tukaani:xz:1.10'
+        classpath 'com.github.luben:zstd-jni:1.5.7-3'
+    }
+}
+
+import groovy.json.JsonOutput
+import groovy.json.JsonSlurper
+import java.nio.file.Files
+import java.nio.file.StandardCopyOption
+import java.nio.file.attribute.FileTime
+import java.security.MessageDigest
+import org.apache.commons.compress.archivers.tar.TarArchiveInputStream
+import org.apache.commons.compress.compressors.gzip.GzipCompressorInputStream
+import org.apache.commons.compress.compressors.xz.XZCompressorInputStream
+import org.apache.commons.compress.compressors.zstandard.ZstdCompressorInputStream
+
+// Sequence-alignment BLAT from UCSC; these hashes pin the reviewed HTTPS downloads.
+// UCSC's rolling URLs can change. Updating a binary requires updating its pinned hash.
+def binaries = [
+    'linux-x64': [url: 'linux.x86_64/blat/blat', sha256: 'c5a8c2566d4a7d98483167ea609d49cea035ea2d0e70366c8610aa8c9ae7e20f'],
+    'linux-arm64': [url: 'linux.aarch64.v492/blat', sha256: '037c77bdc8436b0c79f21e506c917bb1171256b8982039d302f9b44c5a919fc5'],
+    'macos-x64': [url: 'macOSX.x86_64/blat/blat', sha256: '39cd7d6495760bc672e0c753de517c851bcf23fd8864a8e3f1dbadcec257361c'],
+    'macos-arm64': [url: 'macOSX.arm64/blat/blat', sha256: '7c91e2bbccc61f596f27a8a569eca2f9562bd32fd8cf2343752d06352ec67758']
+]
+def base = 'https://hgdownload.soe.ucsc.edu/admin/exe/'
+def sourceUrl = base + 'userApps.archive/userApps.v503.src.tgz'
+def sourceHash = '229a201354d854ce20fb40c7fec69c242decd95262c1fed94e5fa9dcdcb0b129'
+def downloads = layout.buildDirectory.dir('blat-downloads').get().asFile
+def sourceArchive = new File(downloads, 'userApps.v503.src.tgz')
+def toolchain = layout.buildDirectory.dir('blat-cygwin').get().asFile
+def sourceRoot = layout.buildDirectory.dir('blat-native-source').get().asFile
+def packagesFile = file('scripts/portable/blat-cygwin-packages.json')
+def packages = new JsonSlurper().parse(packagesFile)
+def mirror = 'https://mirrors.kernel.org/sourceware/cygwin/'
+def windows = System.getProperty('os.name').toLowerCase(Locale.ROOT).startsWith('windows')
+def arm = System.getProperty('os.arch').toLowerCase(Locale.ROOT) in ['aarch64', 'arm64']
+ext.blatHostPlatform = windows ? 'windows-x64' : System.getProperty('os.name').toLowerCase(Locale.ROOT).contains('mac') ?
+        (arm ? 'macos-arm64' : 'macos-x64') : (arm ? 'linux-arm64' : 'linux-x64')
+ext.blatBundleDirectory = { String platform -> layout.buildDirectory.dir("bundled-blat/${platform}").get().asFile }
+
+def hash = { File file, String algorithm ->
+    def digest = MessageDigest.getInstance(algorithm)
+    file.withInputStream { input ->
+        byte[] buffer = new byte[65536]
+        int count
+        while ((count = input.read(buffer)) >= 0) digest.update(buffer, 0, count)
+    }
+    digest.digest().encodeHex().toString()
+}
+def fetchVerified = { String url, File destination, String expected, String algorithm ->
+    if (destination.isFile() && hash(destination, algorithm) == expected) return
+    destination.parentFile.mkdirs()
+    def partial = new File(destination.parentFile, destination.name + '.part')
+    logger.lifecycle("Downloading ${destination.name}...")
+    def connection = new URL(url).openConnection()
+    connection.connectTimeout = 30000
+    connection.readTimeout = 60000
+    connection.inputStream.withCloseable { input -> partial.withOutputStream { output -> output << input } }
+    if (hash(partial, algorithm) != expected) {
+        throw new GradleException("BLAT download checksum mismatch: ${url}. Review the upstream update before changing the pinned checksum.")
+    }
+    Files.move(partial.toPath(), destination.toPath(), StandardCopyOption.REPLACE_EXISTING)
+}
+
+// Windows builds need no installed Cygwin, compiler, WSL, Python, or administrator rights.
+// Map Cygwin's /usr/bin and /usr/lib aliases and materialize links as regular files.
+def cygwinPath = { String name ->
+    name = name.replaceFirst('^\\./', '')
+    if (name.startsWith('usr/share/') && !name.startsWith('usr/share/doc/Cygwin/') &&
+            !(name =~ /(?i)(COPYING|LICENSE|copyright)/).find()) return null
+    name.replaceFirst('^usr/bin/', 'bin/').replaceFirst('^usr/lib/', 'lib/')
+}
+def extractTar = { File archive, File destination, Closure mapping, Map links, Closure onFile ->
+    def root = destination.toPath().toAbsolutePath().normalize()
+    Files.createDirectories(root)
+    archive.withInputStream { raw ->
+        def compressed = archive.name.endsWith('.zst') ? new ZstdCompressorInputStream(raw) :
+                archive.name.endsWith('.xz') ? new XZCompressorInputStream(raw) : new GzipCompressorInputStream(raw)
+        new TarArchiveInputStream(compressed).withCloseable { input ->
+            def entry
+            while ((entry = input.nextTarEntry) != null) {
+                def name = mapping(entry.name.replaceFirst('^\\./', ''))
+                if (!name) continue
+                def path = root.resolve(name).normalize()
+                if (!path.startsWith(root)) throw new GradleException("Invalid BLAT archive path: ${entry.name}")
+                if (entry.isDirectory()) Files.createDirectories(path)
+                else if (entry.isSymbolicLink() || entry.isLink()) {
+                    def mappedTarget = mapping(entry.linkName.replaceFirst('^/', ''))
+                    if ((entry.linkName.startsWith('/') || entry.isLink()) && !mappedTarget) continue
+                    def target = entry.linkName.startsWith('/') ? root.resolve(mappedTarget) :
+                            entry.isSymbolicLink() ? path.parent.resolve(entry.linkName) : root.resolve(mappedTarget)
+                    target = target.normalize()
+                    if (!target.startsWith(root)) throw new GradleException("Invalid BLAT archive link: ${entry.name}")
+                    links[path] = target
+                } else if (entry.isFile()) {
+                    Files.createDirectories(path.parent)
+                    Files.copy(input, path, StandardCopyOption.REPLACE_EXISTING)
+                    Files.setLastModifiedTime(path, FileTime.fromMillis(entry.lastModifiedDate.time))
+                    onFile(path)
+                }
+            }
+        }
+    }
+}
+def materializeLinks = { Map links ->
+    links.each { path, target ->
+        def seen = [path] as Set
+        while (links.containsKey(target)) {
+            if (!seen.add(target)) throw new GradleException("Cyclic Cygwin archive link: ${path}")
+            target = links[target]
+        }
+        // Directory aliases /usr/bin and /usr/lib are already mapped above.
+        if (Files.isRegularFile(target)) {
+            Files.createDirectories(path.parent)
+            Files.copy(target, path, StandardCopyOption.REPLACE_EXISTING)
+        }
+    }
+}
+def addLicenses = { File destination ->
+    extractTar(sourceArchive, destination, { name ->
+        ['userApps/licenseBlat.txt': 'licenseBlat.txt',
+         'userApps/kent/src/blat/LICENSE': 'BLAT-LICENSE.txt',
+         'userApps/kent/src/jkOwnLib/LICENSE': 'KENT-LICENSE.txt',
+         'userApps/kent/src/lib/LICENSE': 'KENT-LIB-LICENSE.txt',
+         'userApps/kent/src/inc/LICENSE': 'KENT-INC-LICENSE.txt',
+         'userApps/kent/src/submodules/htslib/LICENSE': 'HTSLIB-LICENSE.txt',
+         'userApps/kent/src/submodules/htslib/htscodecs/LICENSE.md': 'HTSCODECS-LICENSE.txt'][name]
+    }, [:], { })
+    new File(destination, 'UCSC-NOTICE.txt').text = '''UCSC sequence-alignment BLAT, copyright Jim Kent.
+Personal, academic and non-profit use is permitted under the included licenses.
+Commercial use requires a separate BLAT license: https://genome.ucsc.edu/license/
+Unix binaries: https://hgdownload.soe.ucsc.edu/admin/exe/
+Windows binary: compiled from the included UCSC v503 source archive.
+'''
+}
+
+def sourceTask = tasks.register('downloadBlatSource') {
+    group = 'distribution'
+    inputs.property('sha256', sourceHash)
+    outputs.file(sourceArchive)
+    doLast { fetchVerified(sourceUrl, sourceArchive, sourceHash, 'SHA-256') }
+}
+def downloadTasks = [:]
+binaries.each { platform, binary ->
+    downloadTasks[platform] = tasks.register('downloadBlat' + platform.split('-').collect { it.capitalize() }.join('')) {
+        group = 'distribution'
+        description = "Download pinned UCSC sequence-alignment BLAT for ${platform}."
+        dependsOn sourceTask
+        inputs.properties(binary)
+        outputs.dir(blatBundleDirectory(platform))
+        doLast {
+            def downloaded = new File(downloads, "blat-${platform}")
+            fetchVerified(base + binary.url, downloaded, binary.sha256, 'SHA-256')
+            def destination = blatBundleDirectory(platform)
+            def executable = new File(destination, 'bin/blat')
+            executable.parentFile.mkdirs()
+            Files.copy(downloaded.toPath(), executable.toPath(), StandardCopyOption.REPLACE_EXISTING)
+            executable.setExecutable(true, false)
+            addLicenses(destination)
+            new File(destination, 'bundle.properties').text = "platform=${platform}\nsource=${base}${binary.url}\nsha256=${binary.sha256}\n"
+        }
+    }
+}
+
+def prepareTask = tasks.register('prepareBlatWindowsBuild') {
+    group = 'distribution'
+    dependsOn sourceTask
+    inputs.file(packagesFile)
+    inputs.property('sourceHash', sourceHash)
+    outputs.file(new File(toolchain, 'dll-owners.json'))
+    outputs.files(['bash.exe', 'gcc.exe', 'make.exe', 'objdump.exe'].collect { new File(toolchain, 'bin/' + it) })
+    outputs.file(new File(sourceRoot, '.prepared'))
+    doLast {
+        if (!windows) throw new GradleException('Building Windows BLAT requires a Windows host. Supply a previously built bundle with -PblatWindowsBundle=/path/to/windows-x64.')
+        def links = [:]
+        def owners = [:]
+        packages.each { pkg ->
+            def archive = new File(downloads, pkg.filename)
+            fetchVerified(pkg.url, archive, pkg.sha512, 'SHA-512')
+            extractTar(archive, toolchain, cygwinPath, links, { path ->
+                if (path.parent == new File(toolchain, 'bin').toPath() && path.toString().endsWith('.dll')) owners[path.fileName.toString().toLowerCase(Locale.ROOT)] = pkg.name
+            })
+        }
+        materializeLinks(links)
+        new File(toolchain, 'tmp').mkdirs()
+        new File(toolchain, 'dll-owners.json').text = JsonOutput.prettyPrint(JsonOutput.toJson(owners))
+        extractTar(sourceArchive, sourceRoot, { name ->
+            name == 'userApps/licenseBlat.txt' || ['inc', 'lib', 'jkOwnLib', 'blat', 'utils/stringify', 'submodules/htslib'].any {
+                name.startsWith("userApps/kent/src/${it}/")
+            } ? name : null
+        }, [:], { })
+        new File(sourceRoot, '.prepared').text = sourceHash
+    }
+}
+def prebuiltWindows = providers.gradleProperty('blatWindowsBundle').orNull
+downloadTasks['windows-x64'] = tasks.register('downloadBlatWindowsX64') {
+    group = 'distribution'
+    description = 'Build UCSC v503 BLAT for Windows x64 using a verified portable Cygwin toolchain.'
+    dependsOn sourceTask
+    if (!prebuiltWindows) dependsOn prepareTask
+    inputs.file('scripts/portable/build-blat-windows.sh')
+    inputs.file(packagesFile)
+    inputs.property('sourceHash', sourceHash)
+    inputs.property('prebuiltWindows', prebuiltWindows ?: '')
+    if (prebuiltWindows) inputs.dir(prebuiltWindows)
+    outputs.dir(blatBundleDirectory('windows-x64'))
+    doLast {
+        def destination = blatBundleDirectory('windows-x64')
+        if (prebuiltWindows) {
+            if (!new File(prebuiltWindows, 'bin/blat.exe').isFile()) throw new GradleException('blatWindowsBundle must contain bin/blat.exe and its runtime DLLs/licenses/sources.')
+            project.sync { from prebuiltWindows; into destination }
+        } else {
+            def bin = new File(destination, 'bin')
+            bin.mkdirs()
+            def environmentPath = new File(toolchain, 'bin').absolutePath + File.pathSeparator + System.getenv('PATH')
+            def log = new File(downloads, 'windows-build.log')
+            def result
+            log.withOutputStream { output ->
+                result = project.exec {
+                    environment 'PATH', environmentPath
+                    commandLine new File(toolchain, 'bin/bash.exe').absolutePath, file('scripts/portable/build-blat-windows.sh').absolutePath,
+                            new File(sourceRoot, 'userApps/kent/src').absolutePath, bin.absolutePath
+                    standardOutput = output
+                    errorOutput = output
+                    ignoreExitValue = true
+                }
+            }
+            if (result.exitValue != 0) throw new GradleException("Windows BLAT build failed; see ${log}")
+            // Bundle only imported Cygwin DLLs, including their transitive dependencies.
+            def pending = [new File(bin, 'blat.exe')]
+            def imported = [] as Set
+            while (!pending.isEmpty()) {
+                def binary = pending.remove(0)
+                def output = new ByteArrayOutputStream()
+                project.exec {
+                    environment 'PATH', environmentPath
+                    commandLine new File(toolchain, 'bin/objdump.exe').absolutePath, '-p', binary.absolutePath
+                    standardOutput = output
+                }
+                (output.toString('UTF-8') =~ /DLL Name:\s+(\S+)/).each { match ->
+                    String name = match[1]
+                    if (name.toLowerCase(Locale.ROOT).startsWith('cyg') && imported.add(name.toLowerCase(Locale.ROOT))) {
+                        def library = new File(toolchain, 'bin/' + name)
+                        if (!library.isFile()) throw new GradleException("Missing BLAT runtime DLL: ${name}")
+                        Files.copy(library.toPath(), new File(bin, name).toPath(), StandardCopyOption.REPLACE_EXISTING)
+                        pending.add(library)
+                    }
+                }
+            }
+            def owners = new JsonSlurper().parse(new File(toolchain, 'dll-owners.json'))
+            def usedPackages = imported.collect { owners[it] }.toSet()
+            if (usedPackages.contains(null)) throw new GradleException('Missing BLAT DLL package provenance.')
+            def legal = new File(destination, 'runtime-legal')
+            def sources = new File(destination, 'sources')
+            legal.mkdirs()
+            sources.mkdirs()
+            // Include corresponding source archives and package notices with the runtime.
+            packages.findAll { usedPackages.contains(it.name) }.each { pkg ->
+                def source = pkg.source.split(' ')
+                def archive = new File(downloads, new File(source[0]).name)
+                fetchVerified(mirror + source[0], archive, source[2], 'SHA-512')
+                Files.copy(archive.toPath(), new File(sources, archive.name).toPath(), StandardCopyOption.REPLACE_EXISTING)
+            }
+            project.copy {
+                from new File(toolchain, 'usr/share/doc')
+                include '**/COPYING*', '**/LICENSE*', '**/copyright*', 'Cygwin/CYGWIN_LICENSE'
+                into legal
+            }
+            Files.copy(sourceArchive.toPath(), new File(sources, sourceArchive.name).toPath(), StandardCopyOption.REPLACE_EXISTING)
+            project.copy {
+                from 'scripts/portable/build-blat-windows.sh', packagesFile, 'gradle/blat.gradle'
+                into sources
+            }
+            new File(destination, 'bundle.properties').text = "platform=windows-x64\nsource=${sourceUrl}\nsource.sha256=${sourceHash}\nsha256=${hash(new File(bin, 'blat.exe'), 'SHA-256')}\nruntime.dlls=${imported.sort().join(',')}\n"
+            new File(legal, 'README.txt').text = '''Windows BLAT uses the Cygwin runtime and the libraries listed in bundle.properties.
+Their corresponding source archives are included in ../sources with the pinned build package manifest.
+Cygwin is LGPLv3+ with its linking exception; see CYGWIN_LICENSE and the source archive's COPYING.LIB.
+The compiler is used only during the build and is not installed or needed on the user's computer.
+https://cygwin.com/licensing.html
+'''
+        }
+        addLicenses(destination)
+    }
+}
+ext.blatDownloadTask = { String platform -> downloadTasks[platform] }
+tasks.register('downloadBlat') { group = 'distribution'; dependsOn downloadTasks[blatHostPlatform] }
+tasks.register('downloadAllBlat') { group = 'distribution'; dependsOn downloadTasks.values() }
+tasks.withType(AbstractCopyTask).configureEach {
+    filesMatching(['**/blat/*/bin/blat', '**/build-blat-windows.sh']) { permissions { unix('rwxr-xr-x') } }
+}

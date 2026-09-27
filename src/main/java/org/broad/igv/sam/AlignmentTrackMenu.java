@@ -30,6 +30,8 @@ import org.broad.igv.ui.util.MessageUtils.ValueCheckboxHolder;
 import org.broad.igv.ui.util.UIUtilities;
 import org.broad.igv.util.StringUtils;
 import org.broad.igv.util.blat.BlatClient;
+import org.broad.igv.blast.BlastSearch;
+import org.broad.igv.blast.LocalBlastClient;
 import org.broad.igv.util.extview.ExtendViewClient;
 
 import javax.swing.*;
@@ -181,6 +183,7 @@ class AlignmentTrackMenu extends IGVPopupMenu {
         addSeparator();
         addBlatItem(e);
         addBlatClippingItems(e);
+        addBlastItems(e);
 
         // Insertion items, only if clicked over an insertion
         AlignmentBlock insertion = alignmentTrack.getInsertion(clickedAlignment, e.getMouseEvent().getX());
@@ -1131,6 +1134,28 @@ class AlignmentTrackMenu extends IGVPopupMenu {
 
     }
 
+    void addBlastItems(final TrackClickEvent event) {
+        Alignment alignment = getSpecificAlignment(event);
+        String sequence = alignment == null ? null : alignment.getReadSequence();
+        if (sequence == null || sequence.equals("*")) {
+            add(BlastSearch.sequenceItem("BLAST read sequence", null, "Read"));
+            return;
+        }
+        String query = alignment.getReadStrand() == Strand.NEGATIVE ? SequenceTrack.getReverseComplement(sequence) : sequence;
+        add(BlastSearch.sequenceItem("BLAST read sequence", query, alignment.getReadName()));
+        ClippingCounts clipping = alignment.getClippingCounts();
+        if (clipping.getLeftSoft() >= LocalBlastClient.MINIMUM_SEQUENCE_LENGTH) {
+            String clip = getClippedSequence(sequence, 0, clipping.getLeftSoft());
+            if (alignment.isNegativeStrand()) clip = SequenceTrack.getReverseComplement(clip);
+            add(BlastSearch.sequenceItem("BLAST left-clipped sequence", clip, alignment.getReadName() + " - left clip"));
+        }
+        if (clipping.getRightSoft() >= LocalBlastClient.MINIMUM_SEQUENCE_LENGTH) {
+            String clip = getClippedSequence(sequence, sequence.length() - clipping.getRightSoft(), sequence.length());
+            if (alignment.isNegativeStrand()) clip = SequenceTrack.getReverseComplement(clip);
+            add(BlastSearch.sequenceItem("BLAST right-clipped sequence", clip, alignment.getReadName() + " - right clip"));
+        }
+    }
+
     void addBlatClippingItems(final TrackClickEvent te) {
         final Alignment alignment = getSpecificAlignment(te);
         if (alignment == null) {
@@ -1265,6 +1290,8 @@ class AlignmentTrackMenu extends IGVPopupMenu {
         final JMenuItem item = new JMenuItem("Copy insert sequence");
         add(item);
         item.addActionListener(aEvt -> StringUtils.copyTextToClipboard(insertion.getBases().getString()));
+
+        add(BlastSearch.sequenceItem("BLAST insert sequence", insertion.getBases() == null ? null : insertion.getBases().getString(), "Insert sequence"));
 
         if (insertion.getBases() != null && insertion.getBases().length >= 10) {
             final JMenuItem blatItem = new JMenuItem("BLAT insert sequence");
@@ -1445,4 +1472,3 @@ class AlignmentTrackMenu extends IGVPopupMenu {
     }
 
 }
-

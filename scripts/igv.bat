@@ -12,7 +12,7 @@ if exist %BatchPath%\jdk-21 (
   set JAVA_CMD=java
 )
 
-::-Xmx8g indicates 8 gb of memory.
+::-Xmx64g indicates 64 gb of memory.
 ::To adjust this (or other Java options), edit the "%USERPROFILE%\.igv\java_arguments" 
 ::file.  For more info, see the README at 
 ::https://raw.githubusercontent.com/igvteam/igv/master/scripts/readme.txt 
@@ -20,7 +20,7 @@ if exist %BatchPath%\jdk-21 (
 set CP=%BatchPath%lib\*
 
 if exist "%USERPROFILE%\.igv\java_arguments" (
-    %JAVA_CMD% -Xmx8g ^
+    %JAVA_CMD% -Xmx64g ^
         @%BatchPath%igv.args ^
         -Dsamjdk.snappy.disable=true ^
         -Djava.net.preferIPv4Stack=true ^
@@ -28,7 +28,7 @@ if exist "%USERPROFILE%\.igv\java_arguments" (
         @"%USERPROFILE%\.igv\java_arguments" ^
         -cp "%CP%" org.broad.igv.ui.Main %*
 ) else (
-    %JAVA_CMD% -Xmx8g ^
+    %JAVA_CMD% -Xmx64g ^
         @%BatchPath%igv.args ^
         -Dsamjdk.snappy.disable=true ^
         -Djava.net.preferIPv4Stack=true ^

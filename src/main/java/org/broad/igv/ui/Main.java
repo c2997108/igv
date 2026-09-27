@@ -177,9 +177,9 @@ public class Main {
                     try {
                         argsFileWriter.append("# See https://raw.githubusercontent.com/igvteam/igv/master/scripts/readme.txt for tips on using this file.");
                         argsFileWriter.append(System.lineSeparator());
-                        argsFileWriter.append("# Uncomment the following line for an 8 GB memory spec for IGV.");
+                        argsFileWriter.append("# Uncomment the following line for a 64 GB maximum heap for IGV.");
                         argsFileWriter.append(System.lineSeparator());
-                        argsFileWriter.append("# -Xmx8G");
+                        argsFileWriter.append("# -Xmx64G");
                         argsFileWriter.append(System.lineSeparator());
                     } finally {
                         argsFileWriter.close();

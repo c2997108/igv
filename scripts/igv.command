@@ -3,7 +3,7 @@
 #This script is intended for launching on Macs
 #It may or may not work on *nix, definitely not on windows
 
-#-Xmx4g indicates 4 gb of memory.
+#-Xmx64g indicates 64 gb of memory.
 #To adjust this (or other Java options), edit the "$HOME/.igv/java_arguments" 
 #file.  For more info, see the README at 
 #https://raw.githubusercontent.com/igvteam/igv/master/scripts/readme.txt 
@@ -28,7 +28,7 @@ CP="${prefix}/lib/*"
 
 # Check if there is a user-specified Java arguments file
 if [ -e "$HOME/.igv/java_arguments" ]; then
-  java -Xmx8g \
+  java -Xmx64g \
          @"${prefix}/igv.args" \
         -Xdock:name="IGV" \
         -Xdock:icon="${prefix}/IGV_64.png" \
@@ -38,7 +38,7 @@ if [ -e "$HOME/.igv/java_arguments" ]; then
         -cp "$CP" \
         org.broad.igv.ui.Main "$@"
 else
-    java -showversion  -Xmx8g \
+    java -showversion  -Xmx64g \
         @"${prefix}/igv.args" \
         -Xdock:name="IGV" \
         -Xdock:icon="${prefix}/IGV_64.png" \

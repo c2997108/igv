@@ -1,0 +1,196 @@
+buildscript {
+    repositories { mavenCentral() }
+    dependencies { classpath 'org.apache.commons:commons-compress:1.28.0' }
+}
+
+import java.nio.file.Files
+import java.nio.file.StandardCopyOption
+import java.nio.file.attribute.PosixFilePermissions
+import java.security.MessageDigest
+import java.util.zip.GZIPInputStream
+import org.apache.commons.compress.archivers.tar.TarArchiveInputStream
+
+// Full desktop JREs include java.desktop and keep the portable download small.
+def runtimeVersion = providers.gradleProperty('javaRuntimeVersion').getOrElse('21.0.12.1+1')
+def targets = [
+        'windows-x64': [os: 'windows', arch: 'x64', blast: 'windows-x64'],
+        'windows-arm64': [os: 'windows', arch: 'aarch64', blast: 'windows-x64'],
+        'linux-x64'  : [os: 'linux', arch: 'x64', blast: 'linux-x64'],
+        'linux-arm64': [os: 'linux', arch: 'aarch64', blast: 'linux-arm64'],
+        'macos-x64'  : [os: 'mac', arch: 'x64', blast: 'macos-universal'],
+        'macos-arm64': [os: 'mac', arch: 'aarch64', blast: 'macos-universal']
+]
+def runtimeDirectory = { String platform -> layout.buildDirectory.dir("bundled-java/${platform}").get().asFile }
+def portableDirectory = { String platform -> layout.buildDirectory.dir("portable/IGV_${platform}").get().asFile }
+def downloadTasks = [:]
+def directoryTasks = []
+def zipTasks = []
+def fetch = { URL url, File file ->
+    def connection = url.openConnection()
+    connection.connectTimeout = 30000
+    connection.readTimeout = 60000
+    connection.inputStream.withCloseable { input -> file.withOutputStream { output -> output << input } }
+}
+def sha256 = { File file ->
+    def digest = MessageDigest.getInstance('SHA-256')
+    file.withInputStream { input ->
+        byte[] buffer = new byte[65536]
+        int count
+        while ((count = input.read(buffer)) >= 0) digest.update(buffer, 0, count)
+    }
+    digest.digest().encodeHex().toString()
+}
+
+// Materialize archive links as regular copies, so cross-building on Windows
+// requires no symlink privileges and the Java libraries and legal notices remain complete.
+def extractRuntime = { File archive, File destination ->
+    destination.parentFile.mkdirs()
+    def staging = Files.createTempDirectory(destination.parentFile.toPath(), '.java-extract-')
+    def links = [:]
+    try {
+        archive.withInputStream { raw ->
+            new TarArchiveInputStream(new GZIPInputStream(raw)).withCloseable { input ->
+                def entry
+                while ((entry = input.nextTarEntry) != null) {
+                    String name = entry.name.replaceFirst('^[^/]+/?', '')
+                    if (!name) continue
+                    def path = staging.resolve(name).normalize()
+                    if (!path.startsWith(staging)) throw new GradleException("Invalid Java archive path: ${entry.name}")
+                    if (entry.isDirectory()) {
+                        Files.createDirectories(path)
+                    } else if (entry.isSymbolicLink() || entry.isLink()) {
+                        def target = entry.isSymbolicLink() ? path.parent.resolve(entry.linkName).normalize() :
+                                staging.resolve(entry.linkName.replaceFirst('^[^/]+/?', '')).normalize()
+                        if (!target.startsWith(staging)) throw new GradleException("Invalid Java archive link: ${entry.name}")
+                        links[path] = target
+                    } else if (entry.isFile()) {
+                        Files.createDirectories(path.parent)
+                        Files.copy(input, path, StandardCopyOption.REPLACE_EXISTING)
+                        try {
+                            Files.setPosixFilePermissions(path, PosixFilePermissions.fromString((entry.mode & 0111) ? 'rwxr-xr-x' : 'rw-r--r--'))
+                        } catch (UnsupportedOperationException ignored) { }
+                    }
+                }
+            }
+        }
+        links.each { path, target ->
+            def seen = [path] as Set
+            while (links.containsKey(target)) {
+                if (!seen.add(target)) throw new GradleException("Cyclic Java archive link: ${path}")
+                target = links[target]
+            }
+            if (!Files.isRegularFile(target)) throw new GradleException("Missing Java archive link target: ${target}")
+            Files.createDirectories(path.parent)
+            Files.copy(target, path, StandardCopyOption.REPLACE_EXISTING)
+        }
+        project.sync { spec ->
+            spec.from(staging.toFile())
+            spec.into(destination)
+        }
+    } finally {
+        delete staging.toFile()
+    }
+}
+
+targets.each { platform, target ->
+    def suffix = platform.split('-').collect { it.capitalize() }.join('')
+    downloadTasks[platform] = tasks.register("downloadJava${suffix}") {
+        group = 'distribution'
+        description = "Download and verify Temurin Java ${runtimeVersion} for ${platform}."
+        inputs.property('runtimeVersion', runtimeVersion)
+        outputs.dir(runtimeDirectory(platform))
+        doLast {
+            def extension = target.os == 'windows' ? 'zip' : 'tar.gz'
+            def filename = "OpenJDK21U-jre_${target.arch}_${target.os}_hotspot_${runtimeVersion.replace('+', '_')}.${extension}"
+            def release = java.net.URLEncoder.encode('jdk-' + runtimeVersion, 'UTF-8')
+            def url = "https://github.com/adoptium/temurin21-binaries/releases/download/${release}/${filename}"
+            def downloads = layout.buildDirectory.dir('java-downloads').get().asFile
+            downloads.mkdirs()
+            def archive = new File(downloads, filename)
+            def checksumFile = new File(downloads, filename + '.sha256.txt')
+            fetch(new URL(url + '.sha256.txt'), checksumFile)
+            def matcher = (checksumFile.getText('UTF-8') =~ /(?i)[0-9a-f]{64}/)
+            if (!matcher.find()) throw new GradleException("Invalid Temurin checksum: ${filename}")
+            def expected = matcher.group().toLowerCase(Locale.ROOT)
+            if (!archive.exists() || sha256(archive) != expected) {
+                logger.lifecycle("Downloading ${filename} from Adoptium...")
+                def partial = new File(downloads, filename + '.part')
+                fetch(new URL(url), partial)
+                if (sha256(partial) != expected) throw new GradleException("Temurin checksum mismatch: ${filename}")
+                Files.move(partial.toPath(), archive.toPath(), StandardCopyOption.REPLACE_EXISTING)
+            }
+            if (extension == 'zip') {
+                project.sync { spec ->
+                    spec.from(zipTree(archive))
+                    spec.eachFile { entry -> entry.path = entry.path.substring(entry.path.indexOf('/') + 1) }
+                    spec.includeEmptyDirs = false
+                    spec.into(runtimeDirectory(platform))
+                }
+            } else {
+                extractRuntime(archive, runtimeDirectory(platform))
+            }
+            new File(runtimeDirectory(platform), 'bundle.properties').text = "version=${runtimeVersion}\nplatform=${platform}\nsource=${url}\nsha256=${expected}\n"
+        }
+    }
+    def directory = tasks.register("createPortable${suffix}", Sync) {
+        group = 'distribution'
+        description = "Create a ${platform} directory with Java, BLAST+, BLAT and a launcher."
+        def blatPlatform = platform.startsWith('windows') ? 'windows-x64' : platform
+        dependsOn 'createDist', downloadTasks[platform], blastDownloadTask(target.blast), blatDownloadTask(blatPlatform)
+        from(layout.buildDirectory.dir('IGV-dist')) {
+            include 'lib/*.jar', 'IGV_64.png', 'igv.args'
+        }
+        from(runtimeDirectory(platform)) { into 'runtime' }
+        from(blastBundleDirectory(target.blast)) { into "blast/${target.blast}" }
+        from(blatBundleDirectory(blatPlatform)) { into "blat/${blatPlatform}" }
+        if (target.os == 'windows') {
+            // BLAST is x64 on both Windows targets. Keep its matching C++ runtime
+            // beside the executables so the loader never picks up ARM64 Java DLLs.
+            dependsOn 'downloadJavaWindowsX64'
+            from(new File(runtimeDirectory('windows-x64'), 'bin')) {
+                include 'msvcp140.dll', 'vcruntime140.dll', 'vcruntime140_1.dll'
+                into "blast/${target.blast}/bin"
+            }
+            from(runtimeDirectory('windows-x64')) {
+                include 'NOTICE', 'legal/**', 'bundle.properties'
+                into "blast/${target.blast}/runtime-legal"
+            }
+            from('scripts/portable/Start-IGV.cmd')
+        } else {
+            from('scripts/portable/Start-IGV.sh') {
+                rename { platform.startsWith('macos') ? 'Start-IGV.command' : 'Start-IGV.sh' }
+            }
+        }
+        from('README.md')
+        from('license.txt')
+        into portableDirectory(platform)
+    }
+    directoryTasks.add(directory)
+    zipTasks.add(tasks.register("createPortable${suffix}Zip", Zip) {
+        group = 'distribution'
+        description = "ZIP the ${platform} Java/BLAST+/BLAT distribution, preserving executable permissions."
+        dependsOn directory
+        from(portableDirectory(platform))
+        into "IGV_${platform}"
+        archiveFileName = "IGV_${platform}_WithJavaBlast.zip"
+    })
+}
+
+tasks.register('downloadAllJava') {
+    group = 'distribution'
+    dependsOn downloadTasks.values()
+}
+tasks.register('createPortableDirectories') {
+    group = 'distribution'
+    dependsOn directoryTasks
+}
+tasks.register('createPortableDistributions') {
+    group = 'distribution'
+    dependsOn zipTasks
+}
+tasks.withType(AbstractCopyTask).configureEach {
+    filesMatching(['**/Start-IGV.sh', '**/Start-IGV.command', '**/runtime/bin/*',
+                   '**/runtime/Contents/Home/bin/*', '**/runtime/**/jspawnhelper', '**/runtime/**/jexec']) {
+        permissions { unix('rwxr-xr-x') }
+    }
+}

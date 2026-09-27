@@ -287,7 +287,19 @@ MASTER_RESOURCE_FILE_KEY	Data registry URL	string	null
 ---
 PROVISIONING.URL	OAuth provisioning URL	string	null
 ---
-BLAT_URL	BLAT URL	string	https://genome.ucsc.edu/cgi-bin/hgBlat
+BLAT_URL	BLAT URL (or local)	string	https://genome.ucsc.edu/cgi-bin/hgBlat	Set local to run BLAT on the loaded reference using PATH or bundled binaries. Existing URLs and command templates are also supported.
+BLAT_EXECUTABLE	Local BLAT executable (auto/PATH/bundled)	string	auto	Used when BLAT URL is local. Optionally specify an executable path or bin directory without quotes or arguments.
+BLAT_TIMEOUT	Local BLAT timeout (seconds)	integer	600
+## Local BLAST+
+BLAST_EXECUTABLE	BLAST+ blastn executable (auto/PATH/bundled)	string	auto	Auto uses PATH first, then bundled BLAST+. Optionally specify a blastn executable or bin directory. Do not add quotes or arguments.
+BLAST_DATABASE	BLAST database prefix (blank = reference)	string	null	Leave blank to build/cache a database from the loaded reference automatically. An optional database prefix is also created from the reference if missing.
+BLAST_TASK	BLAST search task	select auto|blastn|blastn-short|megablast|dc-megablast	auto	Auto uses blastn-short below 50 bases and blastn for longer sequences.
+BLAST_DUST	BLAST DUST low-complexity filtering	boolean	false	Unchecked passes -dust no to include low-complexity and repetitive query regions. Check to enable standard DUST filtering (-dust yes).
+BLAST_EVALUE	BLAST E-value threshold	float	10
+BLAST_MAX_TARGETS	BLAST maximum target sequences	integer	100
+BLAST_THREADS	BLAST threads	integer	1
+BLAST_TIMEOUT	BLAST timeout (seconds)	integer	600
+##
 ---
 AWS_ENDPOINT_URL	AWS endpoint URL	string	null
 

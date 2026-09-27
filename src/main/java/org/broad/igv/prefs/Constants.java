@@ -57,6 +57,16 @@ final public class Constants {
     public static final String BACKUP_GENOMES_SERVER_URL = "IGV.backup.genome.sequence.dir";
     public static final String BLAT_URL = "BLAT_URL";
     public static final String BLAT_SERVER_TYPE = "BLAT_SERVER_TYPE";
+    public static final String BLAT_EXECUTABLE = "BLAT_EXECUTABLE";
+    public static final String BLAT_TIMEOUT = "BLAT_TIMEOUT";
+    public static final String BLAST_EXECUTABLE = "BLAST_EXECUTABLE";
+    public static final String BLAST_DATABASE = "BLAST_DATABASE";
+    public static final String BLAST_TASK = "BLAST_TASK";
+    public static final String BLAST_DUST = "BLAST_DUST";
+    public static final String BLAST_EVALUE = "BLAST_EVALUE";
+    public static final String BLAST_MAX_TARGETS = "BLAST_MAX_TARGETS";
+    public static final String BLAST_THREADS = "BLAST_THREADS";
+    public static final String BLAST_TIMEOUT = "BLAST_TIMEOUT";
     public static final String EXTVIEW_URL = "EXTVIEW_URL";
     public static final String DATA_SERVER_URL_KEY = "MASTER_RESOURCE_FILE_KEY";
     public static final String AUXILLARY_HUBS_URL = "AUXILLARY_HUBS_URL";

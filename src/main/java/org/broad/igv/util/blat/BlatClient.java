@@ -69,6 +69,16 @@ public class BlatClient {
         }
         urlpref = urlpref.trim();
 
+        if (urlpref.equalsIgnoreCase("local")) {
+            Genome genome = IGV.hasInstance() ? GenomeManager.getInstance().getCurrentGenome() : null;
+            try {
+                return LocalBlatClient.search(db, userSeq, genome);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new BlatException("BLAT search was interrupted.", e);
+            }
+        }
+
         if (serverType.equalsIgnoreCase("web_blat")) {
             return LegacyBlatClient.blat(userSeq);
 

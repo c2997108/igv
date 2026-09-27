@@ -71,6 +71,7 @@ public class SessionElement {
     static Map<Class, String> classNameMap = new HashMap<>();
     static {
         classMap.put("BlatTrack", org.broad.igv.track .BlatTrack.class);
+        classMap.put("BlastTrack", org.broad.igv.track.BlastTrack.class);
         classMap.put("FeatureTrack", org.broad.igv.track .FeatureTrack.class);
         classMap.put("SequenceTrack", org.broad.igv.track .SequenceTrack.class);
         classMap.put("DataTrack", org.broad.igv.track .DataTrack.class);

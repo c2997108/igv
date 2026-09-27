@@ -2,7 +2,7 @@
 
 #This script is intended for launch on *nix machines
 
-#-Xmx8g indicates 8 gb of memory.
+#-Xmx64g indicates 64 gb of memory.
 #To adjust this (or other Java options), edit the "$HOME/.igv/java_arguments" 
 #file.  For more info, see the README at 
 #https://raw.githubusercontent.com/igvteam/igv/master/scripts/readme.txt 
@@ -21,7 +21,7 @@ fi
 
 # Check if there is a user-specified Java arguments file
 if [ -e "$HOME/.igv/java_arguments" ]; then
-    java -showversion --module-path="${prefix}/lib" -Xmx8g \
+    java -showversion --module-path="${prefix}/lib" -Xmx64g \
         @"${prefix}/igv.args" \
         -Dsun.java2d.uiScale=2 \
         -Dapple.laf.useScreenMenuBar=true \
@@ -30,7 +30,7 @@ if [ -e "$HOME/.igv/java_arguments" ]; then
         @"$HOME/.igv/java_arguments" \
         --module=org.igv/org.broad.igv.ui.Main "$@"
 else
-    java -showversion --module-path="${prefix}/lib" -Xmx8g \
+    java -showversion --module-path="${prefix}/lib" -Xmx64g \
         @"${prefix}/igv.args" \
         -Dsun.java2d.uiScale=2 \
         -Dapple.laf.useScreenMenuBar=true \

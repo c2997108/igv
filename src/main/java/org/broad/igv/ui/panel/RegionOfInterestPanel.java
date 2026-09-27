@@ -37,6 +37,8 @@ import org.broad.igv.sam.InsertionManager;
 import org.broad.igv.sam.InsertionMarker;
 import org.broad.igv.track.RenderContext;
 import org.broad.igv.util.blat.BlatClient;
+import org.broad.igv.blast.BlastSearch;
+import org.broad.igv.blast.LocalBlastClient;
 import org.broad.igv.feature.RegionOfInterest;
 import org.broad.igv.feature.genome.Genome;
 import org.broad.igv.feature.genome.GenomeManager;
@@ -211,6 +213,11 @@ public class RegionOfInterestPanel extends JPanel {
         }
         popupMenu.add(item);
 
+
+        item = new JMenuItem("BLAST sequence");
+        item.setEnabled(roiLength >= LocalBlastClient.MINIMUM_SEQUENCE_LENGTH && roiLength <= LocalBlastClient.MAXIMUM_SEQUENCE_LENGTH);
+        item.addActionListener(e -> BlastSearch.doBlastQueryFromRegion(roi.getChr(), roi.getStart(), roi.getEnd(), Strand.NONE));
+        popupMenu.add(item);
 
         popupMenu.add(new JSeparator());
 

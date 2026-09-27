@@ -54,6 +54,7 @@ import org.broad.igv.ui.util.UIUtilities;
 import org.broad.igv.util.ResourceLocator;
 import org.broad.igv.util.StringUtils;
 import org.broad.igv.util.blat.BlatClient;
+import org.broad.igv.blast.BlastSearch;
 import org.broad.igv.util.collections.CollUtils;
 import org.w3c.dom.Document;
 import org.w3c.dom.Element;
@@ -1198,6 +1199,7 @@ public class AlignmentTrack extends AbstractTrack implements IGVEventObserver {
             if (insertion.getBases() != null && insertion.getBases().length > 10) {
                 addBlatItem();
             }
+            add(BlastSearch.sequenceItem("BLAST insert sequence", insertion.getBases() == null ? null : insertion.getBases().getString(), "Insert sequence"));
         }
 
 

@@ -11,6 +11,10 @@ plugins {
     id('application')
 }
 
+apply from: 'gradle/blast.gradle'
+apply from: 'gradle/blat.gradle'
+apply from: 'gradle/portable.gradle'
+
 repositories {
     mavenCentral()
     mavenLocal()
@@ -181,8 +185,12 @@ tasks.withType(Test).configureEach {
     useJUnitPlatform()
 }
 
-tasks.register('createDist', Copy) {
-    dependsOn jar
+tasks.register('createDist', Sync) {
+    dependsOn jar, downloadBlast, downloadBlat
+    from(blatBundleDirectory(blatHostPlatform)) { into "blat/${blatHostPlatform}" }
+    from(blastBundleDirectory(blastHostPlatform)) {
+        into "blast/${blastHostPlatform}"
+    }
     from("web/IGV_64.png")
     from("scripts") {
         include '*.bat'
@@ -224,27 +232,33 @@ tasks.register('createDistZip', Zip) {
 
 // Create a linux distribution for IGV , excluding igvtools.  Basically identical to generic dist without window and mac scripts
 tasks.register('createLinuxDistZip', Zip) {
-    dependsOn createDist
-    archiveFileName = "IGV_Linux_${version}.zip"
+    dependsOn createDist, blastDownloadTask(blastLinuxPlatform), blatDownloadTask(blastLinuxPlatform)
+    from(blatBundleDirectory(blastLinuxPlatform)) { into "blat/${blastLinuxPlatform}" }
+    archiveFileName = "IGV_Linux_${version}${blastLinuxPlatform == 'linux-arm64' ? '_ARM64' : ''}.zip"
+    from(blastBundleDirectory(blastLinuxPlatform)) { into "blast/${blastLinuxPlatform}" }
     from("${buildDir}/IGV-dist") {
         exclude "*.bat"
         exclude "*.command"
         exclude 'igvtools*'
         exclude 'lib/genomes'
+        exclude 'blast/**', 'blat/**'
     }
     into "IGV_Linux_${version}"
 }
 
 // Create a linux distrubtion with bundled Java
 tasks.register('createLinuxWithJavaDistZip', Zip) {
-    dependsOn createDist
-    archiveFileName = "IGV_Linux_${version}_WithJava.zip"
+    dependsOn createDist, blastDownloadTask(blastLinuxPlatform), blatDownloadTask(blastLinuxPlatform)
+    from(blatBundleDirectory(blastLinuxPlatform)) { into "blat/${blastLinuxPlatform}" }
+    archiveFileName = "IGV_Linux_${version}${blastLinuxPlatform == 'linux-arm64' ? '_ARM64' : ''}_WithJava.zip"
+    from(blastBundleDirectory(blastLinuxPlatform)) { into "blast/${blastLinuxPlatform}" }
     with copySpec { from jdkBundleLinux into "jdk-21" }
     from("${buildDir}/IGV-dist") {
         exclude "*.bat"
         exclude "*.command"
         exclude 'igvtools*'
         exclude 'lib/genomes'
+        exclude 'blast/**', 'blat/**'
     }
     into "IGV_Linux_${version}"
     doLast {
@@ -255,20 +269,27 @@ tasks.register('createLinuxWithJavaDistZip', Zip) {
 }
 
 tasks.register('createMacDistZip', Zip) {
-    dependsOn createDist
+    dependsOn createDist, blastDownloadTask('macos-universal'), blatDownloadTask('macos-x64'), blatDownloadTask('macos-arm64')
+    from(blatBundleDirectory('macos-x64')) { into 'blat/macos-x64' }
+    from(blatBundleDirectory('macos-arm64')) { into 'blat/macos-arm64' }
+    from(blastBundleDirectory('macos-universal')) { into 'blast/macos-universal' }
     archiveFileName = "IGV_MacApp_${version}.zip"
     from("${buildDir}/IGV-dist") {
         exclude "*.bat"
         exclude "*_hidpi*"
         exclude "igvtools*"
         exclude 'lib/genomes'
+        exclude 'blast/**', 'blat/**'
     }
 
     into "IGV_MacApp_${version}"
 }
 
 tasks.register('createMacWithJavaDistZip', Zip) {
-    dependsOn createDist
+    dependsOn createDist, blastDownloadTask('macos-universal'), blatDownloadTask('macos-x64'), blatDownloadTask('macos-arm64')
+    from(blatBundleDirectory('macos-x64')) { into 'blat/macos-x64' }
+    from(blatBundleDirectory('macos-arm64')) { into 'blat/macos-arm64' }
+    from(blastBundleDirectory('macos-universal')) { into 'blast/macos-universal' }
     archiveFileName = "IGV_MacApp_${version}_WithJava.zip"
     with copySpec { from jdkBundleMac into "jdk-21" }
     from("${buildDir}/IGV-dist") {
@@ -276,6 +297,7 @@ tasks.register('createMacWithJavaDistZip', Zip) {
         exclude "*_hidpi*"
         exclude "igvtools*"
         exclude 'lib/genomes'
+        exclude 'blast/**', 'blat/**'
     }
     into "IGV_MacApp_${version}"
     doLast {
@@ -286,7 +308,12 @@ tasks.register('createMacWithJavaDistZip', Zip) {
 }
 
 tasks.register('createMacAppDist', Copy) {
-    dependsOn createDist
+    dependsOn createDist, blastDownloadTask('macos-universal'), blatDownloadTask('macos-x64'), blatDownloadTask('macos-arm64')
+    from(blatBundleDirectory('macos-x64')) { into "IGV_${version}.app/Contents/Java/blat/macos-x64" }
+    from(blatBundleDirectory('macos-arm64')) { into "IGV_${version}.app/Contents/Java/blat/macos-arm64" }
+    from(blastBundleDirectory('macos-universal')) {
+        into "IGV_${version}.app/Contents/Java/blast/macos-universal"
+    }
     with copySpec {
         from("scripts/mac.app") {
             exclude "Contents/Info.plist.template"
@@ -307,6 +334,7 @@ tasks.register('createMacAppDist', Copy) {
     }
     with copySpec {
         from("${buildDir}/IGV-dist/") include 'igv.args'
+        filter(org.apache.tools.ant.filters.ConcatFilter, prepend: file('scripts/mac-memory.args'))
         into "IGV_${version}.app/Contents/Java/"
     }
     with copySpec {
@@ -365,7 +393,9 @@ tasks.register('createMacAppIntelWithJavaDistZip', Zip) {
 }
 
 tasks.register('createWinDist', Copy) {
-    dependsOn createDist
+    dependsOn createDist, blastDownloadTask('windows-x64'), blatDownloadTask('windows-x64')
+    from(blatBundleDirectory('windows-x64')) { into "IGV_${version}/blat/windows-x64" }
+    from(blastBundleDirectory('windows-x64')) { into "IGV_${version}/blast/windows-x64" }
     with copySpec {
         from("${buildDir}/IGV-dist") {
             exclude "*.sh"
@@ -374,6 +404,7 @@ tasks.register('createWinDist', Copy) {
             exclude "igvtools_gui"
             exclude "igvtools_gui_hidpi"
             exclude 'lib/genomes'
+            exclude 'blast/**', 'blat/**'
         }
         from("resources") { include "IGV_64.ico" }
         into "IGV_${version}"

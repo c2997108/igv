@@ -1097,6 +1097,8 @@ public class IGVSessionReader implements SessionReader {
             return new BasePairTrack();
         } else if (className.contains("BlatTrack")) {
             return new BlatTrack();
+        } else if (className.contains("BlastTrack")) {
+            return new BlastTrack();
         } else if (className.contains("ClusterTrack")) {
             return new ClusterTrack();
         } else if (className.contains("CNFreqTrack")) {
@@ -1195,7 +1197,7 @@ public class IGVSessionReader implements SessionReader {
      * Set of track classes that are not backed by resources (files).
      */
     private static Set<String> resourceIndpendentTracks = new HashSet<>(Arrays.asList("MergedTracks", "CombinedDataTrack",
-            "SequenceTrack", "BlatTrack", "MotifTrack"));
+            "SequenceTrack", "BlatTrack", "BlastTrack", "MotifTrack"));
 
     /**
      * Some synonyms for gene tracks with multiple URLs over time.  Allows matching old sessions to updated genomes.

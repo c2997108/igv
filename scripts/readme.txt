@@ -27,8 +27,8 @@ make the script executable (e.g. chmod a+x igv.sh) depending on the way the bund
 Advanced options follow -- these are not common:
 ------------------------------------------------
 
-The bat and shell scripts are configured to start IGV with 4GB of memory.  This is a 
-reasonable default for most machines but if you are working with very large datasets
+The bat and shell scripts set the maximum Java heap to 64GB (-Xmx64g).
+To change the maximum heap,
 you can override this setting (and other Java-related defaults) by editing IGV's
 java_arguments file, found here (create it if it doesn't exist):
    $HOME/.igv/java_arguments           (Mac and Linux)
@@ -40,7 +40,7 @@ a '#' character) by default when this file is created.  For example, to start IG
 
    -Xmx8g
 
-This will override the default 4GB memory specification.
+This will override the default 64GB memory specification.
 
 Other Java-related command-line options can also be set in this file, though changing anything
 beyond the memory specification is for advanced users only and is not recommended.  See
@@ -73,11 +73,11 @@ is for advanced users only.
 If it's really necessary to use the Java command directly for some reason, here is the appropriate 
 command-line.  To use the default Java, independently installed (java 11 required)
 
-     java --module-path=lib -Xmx4g @igv.args --module=org.igv/org.broad.igv.ui.Main
+     java --module-path=lib -Xmx64g @igv.args --module=org.igv/org.broad.igv.ui.Main
      
 To use the java included with our packaged bundles substitute "./jdk-21/bin/java" for "java", as follows.
 
-    ./jdk-21/bin/java --module-path=lib -Xmx4g @igv.args --module=org.igv/org.broad.igv.ui.Main
+    ./jdk-21/bin/java --module-path=lib -Xmx64g @igv.args --module=org.igv/org.broad.igv.ui.Main
 
 The above commands assume that you are launching IGV from the directory where it was unpacked.
 
