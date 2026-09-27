@@ -2,7 +2,17 @@
 # Launch this portable distribution with its bundled Java 21 runtime.
 set -eu
 
-igv_directory=$(CDPATH= cd -P "$(dirname "$0")" && pwd)
+# Follow each link relative to its own directory; readlink -f is unavailable on macOS.
+igv_script=$0
+while [ -L "$igv_script" ]; do
+    igv_directory=$(CDPATH= cd -P "$(dirname "$igv_script")" && pwd)
+    igv_target=$(readlink "$igv_directory/$(basename "$igv_script")")
+    case "$igv_target" in
+        /*) igv_script=$igv_target ;;
+        *) igv_script=$igv_directory/$igv_target ;;
+    esac
+done
+igv_directory=$(CDPATH= cd -P "$(dirname "$igv_script")" && pwd)
 if [ -x "$igv_directory/runtime/Contents/Home/bin/java" ]; then
     JAVA_HOME="$igv_directory/runtime/Contents/Home"
 elif [ -x "$igv_directory/runtime/bin/java" ]; then
